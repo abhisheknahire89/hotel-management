@@ -2,6 +2,7 @@ import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
 import { sendEmail, sendSms } from './notify.js';
+import { getDefaultRestaurantMenu } from './seed.js';
 import { nextId, readState, storageMode, updateState } from './store.js';
 
 const app = express();
@@ -280,6 +281,16 @@ app.post('/api/restaurant/menu/import', async (req, res) => {
   try {
     await updateState((current) => ({ ...withDefaults(current), restaurantMenu: normalized }));
     return res.status(201).json({ count: normalized.length, menu: normalized });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/restaurant/menu/default', async (_req, res) => {
+  try {
+    const defaultMenu = getDefaultRestaurantMenu();
+    await updateState((current) => ({ ...withDefaults(current), restaurantMenu: defaultMenu }));
+    return res.status(201).json({ count: defaultMenu.length, menu: defaultMenu });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

@@ -272,6 +272,21 @@ function App() {
     }
   };
 
+  const loadDefaultMenu = async () => {
+    try {
+      const result = await apiRequest('/api/restaurant/menu/default', {
+        method: 'POST',
+      });
+      setRestaurantMenu(result.menu || []);
+      setOrderItemsDraft([]);
+      setMenuPickId('');
+      setMenuPickQty(1);
+      setFeedback('success', `Default Nashik menu loaded (${result.count} items).`);
+    } catch (error) {
+      setFeedback('error', error.message);
+    }
+  };
+
   const createRestaurantOrder = async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -467,7 +482,10 @@ function App() {
       <section className="layout-two">
         <Panel title="Restaurant Menu Management">
           <p className="tiny">Upload JSON menu and replace existing menu catalog.</p>
-          <input type="file" accept="application/json" onChange={importMenuFile} />
+          <div className="row">
+            <button type="button" onClick={loadDefaultMenu}>Load Default Nashik Menu</button>
+            <input type="file" accept="application/json" onChange={importMenuFile} />
+          </div>
           <div className="table-wrap">
             <table>
               <thead>

@@ -1,5 +1,26 @@
 const iso = (date) => new Date(date).toISOString().slice(0, 10);
 
+const DEFAULT_RESTAURANT_MENU = [
+  { id: 'M-001', name: 'Nashik Misal Pav', category: 'Breakfast', price: 120, isVeg: true, spiceLevel: 'high' },
+  { id: 'M-002', name: 'Sabudana Khichdi', category: 'Breakfast', price: 110, isVeg: true, spiceLevel: 'mild' },
+  { id: 'M-003', name: 'Thalipeeth with Curd', category: 'Breakfast', price: 130, isVeg: true, spiceLevel: 'mild' },
+  { id: 'M-004', name: 'Kanda Bhaji', category: 'Starter', price: 140, isVeg: true, spiceLevel: 'medium' },
+  { id: 'M-005', name: 'Kothimbir Vadi', category: 'Starter', price: 150, isVeg: true, spiceLevel: 'medium' },
+  { id: 'M-006', name: 'Pithla Bhakri', category: 'Main Course', price: 220, isVeg: true, spiceLevel: 'medium' },
+  { id: 'M-007', name: 'Bharli Vangi', category: 'Main Course', price: 240, isVeg: true, spiceLevel: 'medium' },
+  { id: 'M-008', name: 'Matki Usal', category: 'Main Course', price: 200, isVeg: true, spiceLevel: 'medium' },
+  { id: 'M-009', name: 'Maharashtrian Veg Thali', category: 'Main Course', price: 320, isVeg: true, spiceLevel: 'medium' },
+  { id: 'M-010', name: 'Varan Bhaat with Tup', category: 'Main Course', price: 190, isVeg: true, spiceLevel: 'mild' },
+  { id: 'M-011', name: 'Solkadhi', category: 'Beverage', price: 85, isVeg: true, spiceLevel: 'mild' },
+  { id: 'M-012', name: 'Taak (Spiced Buttermilk)', category: 'Beverage', price: 60, isVeg: true, spiceLevel: 'mild' },
+  { id: 'M-013', name: 'Puran Poli', category: 'Dessert', price: 140, isVeg: true, spiceLevel: 'mild' },
+  { id: 'M-014', name: 'Shrikhand', category: 'Dessert', price: 120, isVeg: true, spiceLevel: 'mild' },
+];
+
+export function getDefaultRestaurantMenu() {
+  return DEFAULT_RESTAURANT_MENU.map((item) => ({ ...item }));
+}
+
 export function createSeedData() {
   const today = new Date();
   const oneDay = 24 * 60 * 60 * 1000;
@@ -97,22 +118,7 @@ export function createSeedData() {
         deliveryStatus: 'seeded',
       },
     ],
-    restaurantMenu: [
-      { id: 'M-001', name: 'Nashik Misal Pav', category: 'Breakfast', price: 120, isVeg: true, spiceLevel: 'high' },
-      { id: 'M-002', name: 'Sabudana Khichdi', category: 'Breakfast', price: 110, isVeg: true, spiceLevel: 'mild' },
-      { id: 'M-003', name: 'Thalipeeth with Curd', category: 'Breakfast', price: 130, isVeg: true, spiceLevel: 'mild' },
-      { id: 'M-004', name: 'Kanda Bhaji', category: 'Starter', price: 140, isVeg: true, spiceLevel: 'medium' },
-      { id: 'M-005', name: 'Kothimbir Vadi', category: 'Starter', price: 150, isVeg: true, spiceLevel: 'medium' },
-      { id: 'M-006', name: 'Pithla Bhakri', category: 'Main Course', price: 220, isVeg: true, spiceLevel: 'medium' },
-      { id: 'M-007', name: 'Bharli Vangi', category: 'Main Course', price: 240, isVeg: true, spiceLevel: 'medium' },
-      { id: 'M-008', name: 'Matki Usal', category: 'Main Course', price: 200, isVeg: true, spiceLevel: 'medium' },
-      { id: 'M-009', name: 'Maharashtrian Veg Thali', category: 'Main Course', price: 320, isVeg: true, spiceLevel: 'medium' },
-      { id: 'M-010', name: 'Varan Bhaat with Tup', category: 'Main Course', price: 190, isVeg: true, spiceLevel: 'mild' },
-      { id: 'M-011', name: 'Solkadhi', category: 'Beverage', price: 85, isVeg: true, spiceLevel: 'mild' },
-      { id: 'M-012', name: 'Taak (Spiced Buttermilk)', category: 'Beverage', price: 60, isVeg: true, spiceLevel: 'mild' },
-      { id: 'M-013', name: 'Puran Poli', category: 'Dessert', price: 140, isVeg: true, spiceLevel: 'mild' },
-      { id: 'M-014', name: 'Shrikhand', category: 'Dessert', price: 120, isVeg: true, spiceLevel: 'mild' },
-    ],
+    restaurantMenu: getDefaultRestaurantMenu(),
     restaurantOrders: [
       {
         id: 'R-001',
