@@ -70,6 +70,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [syncMode, setSyncMode] = useState('server');
   const [isMobile, setIsMobile] = useState(false);
+  const [simpleMode, setSimpleMode] = useState(true);
 
   useEffect(() => {
     const onOnline = () => setOnline(true);
@@ -496,16 +497,13 @@ function App() {
 
       {notice.message && <section className={`notice ${notice.type}`}>{notice.message}</section>}
 
-      <section className="workflow panel">
-        <h3>User Workflow</h3>
-        <ol>
-          <li>Add or verify guest details in "Manage Guest Information".</li>
-          <li>Create reservations and process check-in/check-out.</li>
-          <li>Restaurant manager uploads/updates menu (JSON import).</li>
-          <li>Create restaurant bills by selecting menu items and quantities.</li>
-          <li>Manage open bills and close payments with payment mode.</li>
-          <li>Use alerts, reports, and calendar for daily operations.</li>
-        </ol>
+      <section className="mode-bar panel">
+        <div className="row">
+          <strong>View Mode:</strong>
+          <button type="button" onClick={() => setSimpleMode(true)} className={simpleMode ? 'active-mode' : ''}>Simple</button>
+          <button type="button" onClick={() => setSimpleMode(false)} className={!simpleMode ? 'active-mode' : ''}>Advanced</button>
+        </div>
+        <p className="tiny">{simpleMode ? 'Simple mode shows only essential daily actions.' : 'Advanced mode shows all modules and controls.'}</p>
       </section>
 
       <section className="stats-grid">
@@ -559,6 +557,7 @@ function App() {
         </Panel>
       </section>
 
+      {!simpleMode && (
       <section className="layout-two">
         <Panel title="Manage Guest Information" collapsible={isMobile} defaultOpen={false}>
           <form className="stack" onSubmit={addGuest}>
@@ -605,8 +604,10 @@ function App() {
           </form>
         </Panel>
       </section>
+      )}
 
-      <section className="layout-two">
+      <section className={simpleMode ? 'layout-one' : 'layout-two'}>
+        {!simpleMode && (
         <Panel title="Restaurant Menu Management" collapsible={isMobile} defaultOpen={false}>
           <p className="tiny">Default Nashik menu is preloaded. Upload JSON to replace existing menu catalog.</p>
           <input type="file" accept="application/json" onChange={importMenuFile} />
@@ -642,6 +643,7 @@ function App() {
             </table>
           </div>
         </Panel>
+        )}
 
         <Panel title="Assign Items to Table / Create Bill">
           <form className="stack" onSubmit={createRestaurantOrder}>
@@ -788,7 +790,7 @@ function App() {
           </div>
         </Panel>
 
-        <Panel title="Restaurant Billing History (Paid)" collapsible={isMobile} defaultOpen={false}>
+        <Panel title="Restaurant Billing History (Paid)" collapsible={isMobile || simpleMode} defaultOpen={false}>
           <ul className="list compact">
             {paidRestaurantOrders.length === 0 && <li>No paid bills yet.</li>}
             {paidRestaurantOrders.map((order) => (
@@ -800,6 +802,7 @@ function App() {
         </Panel>
       </section>
 
+      {!simpleMode && (
       <section className="layout-two">
         <Panel title="History of Bookings" collapsible={isMobile} defaultOpen={false}>
           <div className="table-wrap">
@@ -847,7 +850,9 @@ function App() {
           </ul>
         </Panel>
       </section>
+      )}
 
+      {!simpleMode && (
       <section className="layout-two">
         <Panel title="Calendar Timeline of Reservations" collapsible={isMobile} defaultOpen={false}>
           <CalendarTimeline bookings={bookings} guestsById={guestsById} />
@@ -873,6 +878,7 @@ function App() {
           )}
         </Panel>
       </section>
+      )}
     </div>
   );
 }

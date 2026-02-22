@@ -137,6 +137,12 @@ textarea {
   gap: 1rem;
 }
 
+.layout-one {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
 .panel {
   background: var(--panel);
   border-radius: 12px;
@@ -147,6 +153,14 @@ textarea {
 
 .panel h3 {
   margin-top: 0;
+}
+
+.mode-bar {
+  padding-bottom: 0.5rem;
+}
+
+.active-mode {
+  background: #0f6c8c;
 }
 
 .collapsible-panel summary {
