@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hms-cache-v1';
+const CACHE_NAME = 'hms-cache-v2';
 const APP_SHELL = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -18,6 +18,24 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
+  const acceptHeader = event.request.headers.get('accept') || '';
+  const isHtmlRequest = acceptHeader.includes('text/html');
+
+  // Always try network first for HTML/app shell so new deployments appear immediately.
+  if (isHtmlRequest) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('/index.html'))),
+    );
+    return;
+  }
+
+  // Cache-first for static assets.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
