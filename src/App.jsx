@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { initialAlerts, initialBookings, initialGuests, initialRooms } from './data';
+import {
+  initialAlerts,
+  initialBookings,
+  initialGuests,
+  initialRestaurantMenu,
+  initialRestaurantOrders,
+  initialRooms,
+} from './data';
 import {
   generateReport,
   getGuestsCountToday,
@@ -12,6 +19,16 @@ import './styles.css';
 
 const currency = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 const toIsoDate = (value = new Date()) => new Date(value).toISOString().slice(0, 10);
+const localTaxPercent = 5;
+const localServiceChargePercent = 5;
+
+function nextId(collection, prefix) {
+  const max = collection.reduce((currentMax, item) => {
+    const parsed = Number(String(item.id || '').replace(`${prefix}-`, ''));
+    return Number.isFinite(parsed) ? Math.max(currentMax, parsed) : currentMax;
+  }, 0);
+  return `${prefix}-${String(max + 1).padStart(3, '0')}`;
+}
 
 async function apiRequest(path, options = {}) {
   const response = await fetch(path, {
@@ -74,8 +91,8 @@ function App() {
         setGuests(initialGuests);
         setBookings(initialBookings);
         setAlerts(initialAlerts);
-        setRestaurantMenu([]);
-        setRestaurantOrders([]);
+        setRestaurantMenu(initialRestaurantMenu);
+        setRestaurantOrders(initialRestaurantOrders);
         setSyncMode('fallback');
         setNotice({ type: 'error', message: 'API not reachable. Running with local fallback data only.' });
       } finally {
@@ -258,13 +275,37 @@ function App() {
       const parsed = JSON.parse(text);
       const payload = Array.isArray(parsed) ? parsed : parsed.items;
 
-      const result = await apiRequest('/api/restaurant/menu/import', {
-        method: 'POST',
-        body: JSON.stringify({ items: payload }),
-      });
-
-      setRestaurantMenu(result.menu || []);
-      setFeedback('success', `Menu imported successfully (${result.count} items).`);
+      if (syncMode === 'fallback') {
+        if (!Array.isArray(payload) || payload.length === 0) throw new Error('Menu import requires an array.');
+        const normalized = payload
+          .map((item, index) => {
+            const name = String(item?.name || '').trim();
+            const category = String(item?.category || 'Main Course').trim();
+            const price = Number(item?.price);
+            if (!name || !Number.isFinite(price) || price <= 0) return null;
+            return {
+              id: item?.id ? String(item.id) : `M-${String(index + 1).padStart(3, '0')}`,
+              name,
+              category,
+              price: Math.round(price),
+              isVeg: item?.isVeg !== false,
+              spiceLevel: ['mild', 'medium', 'high'].includes(String(item?.spiceLevel || '').toLowerCase())
+                ? String(item.spiceLevel).toLowerCase()
+                : 'medium',
+            };
+          })
+          .filter(Boolean);
+        if (normalized.length === 0) throw new Error('No valid menu items found.');
+        setRestaurantMenu(normalized);
+        setFeedback('success', `Menu imported successfully (${normalized.length} items).`);
+      } else {
+        const result = await apiRequest('/api/restaurant/menu/import', {
+          method: 'POST',
+          body: JSON.stringify({ items: payload }),
+        });
+        setRestaurantMenu(result.menu || []);
+        setFeedback('success', `Menu imported successfully (${result.count} items).`);
+      }
     } catch (error) {
       setFeedback('error', `Menu import failed: ${error.message}`);
     } finally {
@@ -274,14 +315,18 @@ function App() {
 
   const loadDefaultMenu = async () => {
     try {
-      const result = await apiRequest('/api/restaurant/menu/default', {
-        method: 'POST',
-      });
-      setRestaurantMenu(result.menu || []);
+      if (syncMode === 'fallback') {
+        setRestaurantMenu(initialRestaurantMenu);
+      } else {
+        const result = await apiRequest('/api/restaurant/menu/default', {
+          method: 'POST',
+        });
+        setRestaurantMenu(result.menu || []);
+      }
       setOrderItemsDraft([]);
       setMenuPickId('');
       setMenuPickQty(1);
-      setFeedback('success', `Default Nashik menu loaded (${result.count} items).`);
+      setFeedback('success', `Default Nashik menu loaded (${initialRestaurantMenu.length} items).`);
     } catch (error) {
       setFeedback('error', error.message);
     }
@@ -306,10 +351,51 @@ function App() {
     };
 
     try {
-      const created = await apiRequest('/api/restaurant/orders', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
+      let created;
+      if (syncMode === 'fallback') {
+        const items = payload.items
+          .map((item) => {
+            const menuItem = menuById[item.menuId];
+            const qty = Number(item.qty);
+            if (!menuItem || !Number.isFinite(qty) || qty <= 0) return null;
+            const cleanQty = Math.floor(qty);
+            return {
+              menuId: menuItem.id,
+              name: menuItem.name,
+              price: menuItem.price,
+              qty: cleanQty,
+              lineTotal: cleanQty * menuItem.price,
+            };
+          })
+          .filter(Boolean);
+        const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+        const taxAmount = Math.round((subtotal * localTaxPercent) / 100);
+        const serviceChargeAmount = Math.round((subtotal * localServiceChargePercent) / 100);
+        created = {
+          id: nextId(restaurantOrders, 'R'),
+          guestId: payload.guestId,
+          roomNumber: payload.roomNumber,
+          table: payload.table,
+          items,
+          subtotal,
+          taxPercent: localTaxPercent,
+          taxAmount,
+          serviceChargePercent: localServiceChargePercent,
+          serviceChargeAmount,
+          totalAmount: subtotal + taxAmount + serviceChargeAmount,
+          paymentMode: null,
+          billedBy: payload.billedBy,
+          notes: payload.notes,
+          status: 'open',
+          orderedAt: new Date().toISOString(),
+          paidAt: null,
+        };
+      } else {
+        created = await apiRequest('/api/restaurant/orders', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+      }
 
       setRestaurantOrders((current) => [created, ...current]);
       setOrderItemsDraft([]);
@@ -325,10 +411,18 @@ function App() {
   const payRestaurantOrder = async (orderId) => {
     const paymentMode = paymentModes[orderId] || 'Cash';
     try {
-      const updated = await apiRequest(`/api/restaurant/orders/${orderId}/pay`, {
-        method: 'POST',
-        body: JSON.stringify({ paymentMode }),
-      });
+      let updated;
+      if (syncMode === 'fallback') {
+        const target = restaurantOrders.find((order) => order.id === orderId);
+        if (!target) throw new Error('Restaurant order not found.');
+        if (target.status === 'paid') throw new Error('Restaurant order is already paid.');
+        updated = { ...target, status: 'paid', paymentMode, paidAt: new Date().toISOString() };
+      } else {
+        updated = await apiRequest(`/api/restaurant/orders/${orderId}/pay`, {
+          method: 'POST',
+          body: JSON.stringify({ paymentMode }),
+        });
+      }
       setRestaurantOrders((current) => current.map((order) => (order.id === updated.id ? updated : order)));
       setFeedback('success', `Restaurant order ${updated.id} marked as paid via ${paymentMode}.`);
     } catch (error) {
