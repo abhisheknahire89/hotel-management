@@ -69,6 +69,7 @@ function App() {
   const [notice, setNotice] = useState({ type: 'info', message: '' });
   const [loading, setLoading] = useState(true);
   const [syncMode, setSyncMode] = useState('server');
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     const onOnline = () => setOnline(true);
@@ -79,6 +80,14 @@ function App() {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 900px)');
+    const apply = () => setIsMobile(media.matches);
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
   }, []);
 
   useEffect(() => {
@@ -538,7 +547,7 @@ function App() {
           </table>
         </Panel>
 
-        <Panel title="Guests Expected Today">
+        <Panel title="Guests Expected Today" collapsible={isMobile} defaultOpen={false}>
           <ul className="list">
             {expectedToday.length === 0 && <li>No expected arrivals today.</li>}
             {expectedToday.map((booking) => (
@@ -551,7 +560,7 @@ function App() {
       </section>
 
       <section className="layout-two">
-        <Panel title="Manage Guest Information">
+        <Panel title="Manage Guest Information" collapsible={isMobile} defaultOpen={false}>
           <form className="stack" onSubmit={addGuest}>
             <input name="name" placeholder="Guest name" required />
             <input type="email" name="email" placeholder="Email" required />
@@ -565,7 +574,7 @@ function App() {
           </form>
         </Panel>
 
-        <Panel title="Create Reservation">
+        <Panel title="Create Reservation" collapsible={isMobile} defaultOpen={false}>
           <form className="stack" onSubmit={addBooking}>
             <select name="guestId" required>
               <option value="">Select guest</option>
@@ -598,7 +607,7 @@ function App() {
       </section>
 
       <section className="layout-two">
-        <Panel title="Restaurant Menu Management">
+        <Panel title="Restaurant Menu Management" collapsible={isMobile} defaultOpen={false}>
           <p className="tiny">Default Nashik menu is preloaded. Upload JSON to replace existing menu catalog.</p>
           <input type="file" accept="application/json" onChange={importMenuFile} />
           <input
@@ -779,7 +788,7 @@ function App() {
           </div>
         </Panel>
 
-        <Panel title="Restaurant Billing History (Paid)">
+        <Panel title="Restaurant Billing History (Paid)" collapsible={isMobile} defaultOpen={false}>
           <ul className="list compact">
             {paidRestaurantOrders.length === 0 && <li>No paid bills yet.</li>}
             {paidRestaurantOrders.map((order) => (
@@ -792,7 +801,7 @@ function App() {
       </section>
 
       <section className="layout-two">
-        <Panel title="History of Bookings">
+        <Panel title="History of Bookings" collapsible={isMobile} defaultOpen={false}>
           <div className="table-wrap">
             <table>
               <thead>
@@ -819,7 +828,7 @@ function App() {
           </div>
         </Panel>
 
-        <Panel title="Mail / Message Alerts">
+        <Panel title="Mail / Message Alerts" collapsible={isMobile} defaultOpen={false}>
           <form className="stack" onSubmit={sendAlert}>
             <select name="channel" defaultValue="Email">
               <option>Email</option>
@@ -840,11 +849,11 @@ function App() {
       </section>
 
       <section className="layout-two">
-        <Panel title="Calendar Timeline of Reservations">
+        <Panel title="Calendar Timeline of Reservations" collapsible={isMobile} defaultOpen={false}>
           <CalendarTimeline bookings={bookings} guestsById={guestsById} />
         </Panel>
 
-        <Panel title="One-Click Reports">
+        <Panel title="One-Click Reports" collapsible={isMobile} defaultOpen={false}>
           <div className="row">
             <button onClick={() => generate('monthly')}>Monthly</button>
             <button onClick={() => generate('quarterly')}>Quarterly</button>
@@ -877,12 +886,21 @@ function StatCard({ title, value }) {
   );
 }
 
-function Panel({ title, children }) {
+function Panel({ title, children, collapsible = false, defaultOpen = true }) {
+  if (!collapsible) {
+    return (
+      <article className="panel">
+        <h3>{title}</h3>
+        {children}
+      </article>
+    );
+  }
+
   return (
-    <article className="panel">
-      <h3>{title}</h3>
-      {children}
-    </article>
+    <details className="panel collapsible-panel" open={defaultOpen}>
+      <summary>{title}</summary>
+      <div className="panel-body">{children}</div>
+    </details>
   );
 }
 

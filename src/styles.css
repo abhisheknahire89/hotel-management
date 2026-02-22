@@ -149,6 +149,31 @@ textarea {
   margin-top: 0;
 }
 
+.collapsible-panel summary {
+  cursor: pointer;
+  font-size: 1.05rem;
+  font-weight: 700;
+  list-style: none;
+}
+
+.collapsible-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-panel summary::after {
+  content: '+';
+  float: right;
+  font-weight: 700;
+}
+
+.collapsible-panel[open] summary::after {
+  content: '-';
+}
+
+.panel-body {
+  margin-top: 0.75rem;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -297,6 +322,10 @@ textarea {
   min-width: 110px;
 }
 
+.table-wrap {
+  overflow-x: auto;
+}
+
 .report {
   margin-top: 0.8rem;
   background: #f6fbff;
@@ -357,5 +386,28 @@ textarea {
   .hero {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .app-shell {
+    padding: 0.7rem;
+    gap: 0.7rem;
+  }
+
+  .panel {
+    padding: 0.75rem;
+  }
+
+  th,
+  td {
+    font-size: 0.82rem;
+    padding: 0.45rem;
+  }
+
+  button {
+    padding: 0.5rem 0.7rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
