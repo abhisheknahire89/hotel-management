@@ -55,8 +55,14 @@ function App() {
   const [restaurantMenu, setRestaurantMenu] = useState([]);
   const [restaurantOrders, setRestaurantOrders] = useState([]);
   const [orderItemsDraft, setOrderItemsDraft] = useState([]);
-  const [menuPickId, setMenuPickId] = useState('');
-  const [menuPickQty, setMenuPickQty] = useState(1);
+  const [menuSearch, setMenuSearch] = useState('');
+  const [restaurantDraft, setRestaurantDraft] = useState({
+    table: '',
+    guestId: '',
+    roomNumber: '',
+    billedBy: 'Restaurant Cashier',
+    notes: '',
+  });
   const [paymentModes, setPaymentModes] = useState({});
   const [report, setReport] = useState(null);
   const [online, setOnline] = useState(navigator.onLine);
@@ -117,6 +123,13 @@ function App() {
 
   const guestsById = useMemo(() => Object.fromEntries(guests.map((guest) => [guest.id, guest])), [guests]);
   const menuById = useMemo(() => Object.fromEntries(restaurantMenu.map((item) => [item.id, item])), [restaurantMenu]);
+  const filteredMenu = useMemo(() => {
+    const query = menuSearch.trim().toLowerCase();
+    if (!query) return restaurantMenu;
+    return restaurantMenu.filter((item) =>
+      `${item.name} ${item.category}`.toLowerCase().includes(query),
+    );
+  }, [menuSearch, restaurantMenu]);
 
   const summary = useMemo(() => {
     const todayIncome = getTodayIncome(bookings, todayIso);
@@ -146,6 +159,30 @@ function App() {
     () => restaurantOrders.filter((order) => order.status === 'paid').slice(0, 12),
     [restaurantOrders],
   );
+  const draftBill = useMemo(() => {
+    const items = orderItemsDraft
+      .map((entry) => {
+        const menuItem = menuById[entry.menuId];
+        if (!menuItem) return null;
+        const qty = Math.max(1, Number(entry.qty) || 1);
+        return {
+          ...entry,
+          name: menuItem.name,
+          price: menuItem.price,
+          lineTotal: qty * menuItem.price,
+        };
+      })
+      .filter(Boolean);
+
+    const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+    const taxPercent = localTaxPercent;
+    const serviceChargePercent = localServiceChargePercent;
+    const taxAmount = Math.round((subtotal * taxPercent) / 100);
+    const serviceChargeAmount = Math.round((subtotal * serviceChargePercent) / 100);
+    const total = subtotal + taxAmount + serviceChargeAmount;
+
+    return { items, subtotal, taxPercent, taxAmount, serviceChargePercent, serviceChargeAmount, total };
+  }, [orderItemsDraft, menuById]);
 
   const setFeedback = (type, message) => setNotice({ type, message });
 
@@ -250,32 +287,26 @@ function App() {
     }
   };
 
-  const addDraftItem = () => {
-    const menuId = String(menuPickId || '').trim();
-    const qty = Number(menuPickQty);
-    if (!menuId || !Number.isFinite(qty) || qty <= 0) {
-      setFeedback('error', 'Select menu item and valid quantity.');
-      return;
-    }
-
-    const menuItem = menuById[menuId];
-    if (!menuItem) {
-      setFeedback('error', 'Invalid menu item selected.');
-      return;
-    }
-
+  const addDraftItem = (menuId) => {
+    const itemId = String(menuId || '').trim();
+    if (!itemId || !menuById[itemId]) return;
     setOrderItemsDraft((current) => {
-      const existing = current.find((item) => item.menuId === menuId);
+      const existing = current.find((item) => item.menuId === itemId);
       if (existing) {
-        return current.map((item) => (item.menuId === menuId ? { ...item, qty: item.qty + qty } : item));
+        return current.map((item) => (item.menuId === itemId ? { ...item, qty: item.qty + 1 } : item));
       }
-      return [...current, { menuId, qty }];
+      return [...current, { menuId: itemId, qty: 1 }];
     });
-    setMenuPickQty(1);
   };
 
   const removeDraftItem = (menuId) => {
     setOrderItemsDraft((current) => current.filter((item) => item.menuId !== menuId));
+  };
+  const changeDraftQty = (menuId, nextQty) => {
+    const safeQty = Math.max(1, Number(nextQty) || 1);
+    setOrderItemsDraft((current) =>
+      current.map((item) => (item.menuId === menuId ? { ...item, qty: safeQty } : item)),
+    );
   };
 
   const importMenuFile = async (event) => {
@@ -327,21 +358,23 @@ function App() {
 
   const createRestaurantOrder = async (event) => {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-
     if (orderItemsDraft.length === 0) {
       setFeedback('error', 'Add at least one menu item to create restaurant order.');
       return;
     }
 
     const payload = {
-      table: String(formData.get('table') || '').trim(),
-      guestId: String(formData.get('guestId') || '').trim() || null,
-      roomNumber: Number(formData.get('roomNumber')) || null,
-      billedBy: String(formData.get('billedBy') || 'Restaurant Cashier').trim(),
-      notes: String(formData.get('notes') || '').trim(),
+      table: String(restaurantDraft.table || '').trim(),
+      guestId: String(restaurantDraft.guestId || '').trim() || null,
+      roomNumber: Number(restaurantDraft.roomNumber) || null,
+      billedBy: String(restaurantDraft.billedBy || 'Restaurant Cashier').trim(),
+      notes: String(restaurantDraft.notes || '').trim(),
       items: orderItemsDraft,
     };
+    if (!payload.table) {
+      setFeedback('error', 'Table number is required.');
+      return;
+    }
 
     try {
       let created;
@@ -392,9 +425,7 @@ function App() {
 
       setRestaurantOrders((current) => [created, ...current]);
       setOrderItemsDraft([]);
-      setMenuPickId('');
-      setMenuPickQty(1);
-      event.currentTarget.reset();
+      setRestaurantDraft((current) => ({ ...current, table: '', guestId: '', roomNumber: '', notes: '' }));
       setFeedback('success', `Restaurant bill ${created.id} created for table ${created.table}.`);
     } catch (error) {
       setFeedback('error', error.message);
@@ -570,6 +601,11 @@ function App() {
         <Panel title="Restaurant Menu Management">
           <p className="tiny">Default Nashik menu is preloaded. Upload JSON to replace existing menu catalog.</p>
           <input type="file" accept="application/json" onChange={importMenuFile} />
+          <input
+            placeholder="Search menu item or category"
+            value={menuSearch}
+            onChange={(event) => setMenuSearch(event.target.value)}
+          />
           <div className="table-wrap">
             <table>
               <thead>
@@ -578,15 +614,19 @@ function App() {
                   <th>Item</th>
                   <th>Category</th>
                   <th>Price</th>
+                  <th>Add</th>
                 </tr>
               </thead>
               <tbody>
-                {restaurantMenu.map((item) => (
+                {filteredMenu.map((item) => (
                   <tr key={item.id}>
                     <td>{item.id}</td>
                     <td>{item.name}</td>
                     <td>{item.category}</td>
                     <td>{currency.format(item.price)}</td>
+                    <td className="actions">
+                      <button type="button" onClick={() => addDraftItem(item.id)}>Add</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -594,10 +634,28 @@ function App() {
           </div>
         </Panel>
 
-        <Panel title="Create Restaurant Bill">
+        <Panel title="Assign Items to Table / Create Bill">
           <form className="stack" onSubmit={createRestaurantOrder}>
-            <input name="table" placeholder="Table number (e.g. G-03)" required />
-            <select name="guestId" defaultValue="">
+            <input
+              placeholder="Table number (e.g. G-03)"
+              required
+              value={restaurantDraft.table}
+              onChange={(event) =>
+                setRestaurantDraft((current) => ({
+                  ...current,
+                  table: event.target.value,
+                }))
+              }
+            />
+            <select
+              value={restaurantDraft.guestId}
+              onChange={(event) =>
+                setRestaurantDraft((current) => ({
+                  ...current,
+                  guestId: event.target.value,
+                }))
+              }
+            >
               <option value="">Optional: Link guest</option>
               {guests.map((guest) => (
                 <option key={guest.id} value={guest.id}>
@@ -605,37 +663,67 @@ function App() {
                 </option>
               ))}
             </select>
-            <input type="number" name="roomNumber" placeholder="Optional: Room number" min="0" />
-            <input name="billedBy" placeholder="Billed by" defaultValue="Restaurant Cashier" />
-            <textarea name="notes" placeholder="Bill notes" rows={2} />
-
-            <div className="row">
-              <select value={menuPickId} onChange={(event) => setMenuPickId(event.target.value)}>
-                <option value="">Select menu item</option>
-                {restaurantMenu.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} ({currency.format(item.price)})
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                min="1"
-                value={menuPickQty}
-                onChange={(event) => setMenuPickQty(Number(event.target.value) || 1)}
-              />
-              <button type="button" onClick={addDraftItem}>Add Item</button>
-            </div>
+            <input
+              type="number"
+              placeholder="Optional: Room number"
+              min="0"
+              value={restaurantDraft.roomNumber}
+              onChange={(event) =>
+                setRestaurantDraft((current) => ({
+                  ...current,
+                  roomNumber: event.target.value,
+                }))
+              }
+            />
+            <input
+              placeholder="Billed by"
+              value={restaurantDraft.billedBy}
+              onChange={(event) =>
+                setRestaurantDraft((current) => ({
+                  ...current,
+                  billedBy: event.target.value,
+                }))
+              }
+            />
+            <textarea
+              placeholder="Bill notes"
+              rows={2}
+              value={restaurantDraft.notes}
+              onChange={(event) =>
+                setRestaurantDraft((current) => ({
+                  ...current,
+                  notes: event.target.value,
+                }))
+              }
+            />
 
             <ul className="list compact">
               {orderItemsDraft.length === 0 && <li>No items selected yet.</li>}
-              {orderItemsDraft.map((item) => (
+              {draftBill.items.map((item) => (
                 <li key={item.menuId} className="bill-line">
-                  <span>{menuById[item.menuId]?.name} x {item.qty}</span>
+                  <span>{item.name}</span>
+                  <div className="qty-box">
+                    <button type="button" onClick={() => changeDraftQty(item.menuId, item.qty - 1)}>-</button>
+                    <input
+                      type="number"
+                      min="1"
+                      value={item.qty}
+                      onChange={(event) => changeDraftQty(item.menuId, event.target.value)}
+                    />
+                    <button type="button" onClick={() => changeDraftQty(item.menuId, item.qty + 1)}>+</button>
+                  </div>
+                  <span>{currency.format(item.lineTotal)}</span>
                   <button type="button" onClick={() => removeDraftItem(item.menuId)}>Remove</button>
                 </li>
               ))}
             </ul>
+
+            <div className="bill-summary">
+              <p>Subtotal: {currency.format(draftBill.subtotal)}</p>
+              <p>Tax ({draftBill.taxPercent}%): {currency.format(draftBill.taxAmount)}</p>
+              <p>Service ({draftBill.serviceChargePercent}%): {currency.format(draftBill.serviceChargeAmount)}</p>
+              <p><strong>Total: {currency.format(draftBill.total)}</strong></p>
+            </div>
 
             <button type="submit">Create Restaurant Bill</button>
           </form>

@@ -259,10 +259,37 @@ textarea {
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .bill-line button {
   padding: 0.2rem 0.45rem;
+}
+
+.qty-box {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.qty-box input {
+  width: 70px;
+  padding: 0.25rem;
+}
+
+.qty-box button {
+  padding: 0.2rem 0.55rem;
+}
+
+.bill-summary {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem;
+  background: #f8fbfd;
+}
+
+.bill-summary p {
+  margin: 0.2rem 0;
 }
 
 .actions select {
