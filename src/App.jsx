@@ -79,12 +79,24 @@ function App() {
     const load = async () => {
       try {
         const data = await apiRequest('/api/bootstrap');
+        const menu = data.restaurantMenu || [];
         setRooms(data.rooms || []);
         setGuests(data.guests || []);
         setBookings(data.bookings || []);
         setAlerts(data.alerts || []);
-        setRestaurantMenu(data.restaurantMenu || []);
         setRestaurantOrders(data.restaurantOrders || []);
+
+        if (menu.length === 0) {
+          try {
+            const result = await apiRequest('/api/restaurant/menu/default', { method: 'POST' });
+            setRestaurantMenu(result.menu || initialRestaurantMenu);
+          } catch (_error) {
+            setRestaurantMenu(initialRestaurantMenu);
+          }
+        } else {
+          setRestaurantMenu(menu);
+        }
+
         setSyncMode('server');
       } catch (_error) {
         setRooms(initialRooms);
@@ -310,25 +322,6 @@ function App() {
       setFeedback('error', `Menu import failed: ${error.message}`);
     } finally {
       event.target.value = '';
-    }
-  };
-
-  const loadDefaultMenu = async () => {
-    try {
-      if (syncMode === 'fallback') {
-        setRestaurantMenu(initialRestaurantMenu);
-      } else {
-        const result = await apiRequest('/api/restaurant/menu/default', {
-          method: 'POST',
-        });
-        setRestaurantMenu(result.menu || []);
-      }
-      setOrderItemsDraft([]);
-      setMenuPickId('');
-      setMenuPickQty(1);
-      setFeedback('success', `Default Nashik menu loaded (${initialRestaurantMenu.length} items).`);
-    } catch (error) {
-      setFeedback('error', error.message);
     }
   };
 
@@ -575,11 +568,8 @@ function App() {
 
       <section className="layout-two">
         <Panel title="Restaurant Menu Management">
-          <p className="tiny">Upload JSON menu and replace existing menu catalog.</p>
-          <div className="row">
-            <button type="button" onClick={loadDefaultMenu}>Load Default Nashik Menu</button>
-            <input type="file" accept="application/json" onChange={importMenuFile} />
-          </div>
+          <p className="tiny">Default Nashik menu is preloaded. Upload JSON to replace existing menu catalog.</p>
+          <input type="file" accept="application/json" onChange={importMenuFile} />
           <div className="table-wrap">
             <table>
               <thead>
