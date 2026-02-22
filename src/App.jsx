@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { initialAlerts, initialBookings, initialGuests, initialRooms } from './data';
-import { getGuestsCountToday, getOccupancyRate, getRevenuePerRoom, getTodayIncome, generateReport } from './utils/metrics';
+import {
+  generateReport,
+  getGuestsCountToday,
+  getOccupancyRate,
+  getRestaurantIncomeToday,
+  getRevenuePerRoom,
+  getTodayIncome,
+} from './utils/metrics';
 import './styles.css';
 
 const currency = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
@@ -28,6 +35,7 @@ function App() {
   const [guests, setGuests] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [restaurantOrders, setRestaurantOrders] = useState([]);
   const [report, setReport] = useState(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [notice, setNotice] = useState({ type: 'info', message: '' });
@@ -53,12 +61,14 @@ function App() {
         setGuests(data.guests || []);
         setBookings(data.bookings || []);
         setAlerts(data.alerts || []);
+        setRestaurantOrders(data.restaurantOrders || []);
         setSyncMode('server');
       } catch (_error) {
         setRooms(initialRooms);
         setGuests(initialGuests);
         setBookings(initialBookings);
         setAlerts(initialAlerts);
+        setRestaurantOrders([]);
         setSyncMode('fallback');
         setNotice({ type: 'error', message: 'API not reachable. Running with local fallback data only.' });
       } finally {
@@ -73,11 +83,12 @@ function App() {
 
   const summary = useMemo(() => {
     const todayIncome = getTodayIncome(bookings, todayIso);
+    const restaurantIncome = getRestaurantIncomeToday(restaurantOrders, todayIso);
     const occupancyRate = getOccupancyRate(bookings, rooms, todayIso);
     const revenuePerRoom = getRevenuePerRoom(bookings, rooms, todayIso);
     const numberOfGuests = getGuestsCountToday(bookings, todayIso);
-    return { todayIncome, occupancyRate, revenuePerRoom, numberOfGuests };
-  }, [bookings, rooms, todayIso]);
+    return { todayIncome, restaurantIncome, occupancyRate, revenuePerRoom, numberOfGuests };
+  }, [bookings, restaurantOrders, rooms, todayIso]);
 
   const expectedToday = useMemo(
     () => bookings.filter((booking) => booking.checkIn === todayIso && booking.status === 'reserved'),
@@ -197,6 +208,41 @@ function App() {
     setFeedback('success', `${period[0].toUpperCase() + period.slice(1)} report generated.`);
   };
 
+  const addRestaurantOrder = async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+
+    const payload = {
+      guestId: String(formData.get('guestId') || '').trim() || null,
+      roomNumber: Number(formData.get('roomNumber')) || null,
+      table: String(formData.get('table') || '').trim(),
+      itemSummary: String(formData.get('itemSummary') || '').trim(),
+      amount: Number(formData.get('amount')),
+    };
+
+    try {
+      const created = await apiRequest('/api/restaurant/orders', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      setRestaurantOrders((current) => [created, ...current]);
+      event.currentTarget.reset();
+      setFeedback('success', `Restaurant order ${created.id} created for table ${created.table}.`);
+    } catch (error) {
+      setFeedback('error', error.message);
+    }
+  };
+
+  const payRestaurantOrder = async (orderId) => {
+    try {
+      const updated = await apiRequest(`/api/restaurant/orders/${orderId}/pay`, { method: 'POST' });
+      setRestaurantOrders((current) => current.map((order) => (order.id === updated.id ? updated : order)));
+      setFeedback('success', `Restaurant order ${updated.id} marked as paid.`);
+    } catch (error) {
+      setFeedback('error', error.message);
+    }
+  };
+
   if (loading) {
     return (
       <div className="app-shell">
@@ -231,6 +277,7 @@ function App() {
           <li>Add or verify guest details in "Manage Guest Information".</li>
           <li>Create a reservation in "Create Reservation" (conflicts are blocked automatically).</li>
           <li>Use "Check-in / Check-out" to move booking status through stay lifecycle.</li>
+          <li>Manage ground-floor restaurant orders and mark bills paid.</li>
           <li>Track expected arrivals, booking history, and send alerts when needed.</li>
           <li>Review calendar and generate monthly/quarterly/yearly reports.</li>
         </ol>
@@ -238,6 +285,7 @@ function App() {
 
       <section className="stats-grid">
         <StatCard title="Today's Income" value={currency.format(summary.todayIncome)} />
+        <StatCard title="Restaurant Income" value={currency.format(summary.restaurantIncome)} />
         <StatCard title="Revenue / Room" value={currency.format(summary.revenuePerRoom)} />
         <StatCard title="Occupancy Rate" value={`${summary.occupancyRate}%`} />
         <StatCard title="No. of Guests" value={String(summary.numberOfGuests)} />
@@ -356,6 +404,74 @@ function App() {
       </section>
 
       <section className="layout-two">
+        <Panel title="Ground Floor Restaurant">
+          <form className="stack" onSubmit={addRestaurantOrder}>
+            <input name="table" placeholder="Table number (e.g. G-04)" required />
+            <input name="itemSummary" placeholder="Items ordered" required />
+            <input type="number" name="amount" placeholder="Bill amount" min="0" required />
+            <select name="guestId" defaultValue="">
+              <option value="">Optional: Link guest</option>
+              {guests.map((guest) => (
+                <option key={guest.id} value={guest.id}>
+                  {guest.id} - {guest.name}
+                </option>
+              ))}
+            </select>
+            <input type="number" name="roomNumber" placeholder="Optional: Room number" min="0" />
+            <button type="submit">Create Restaurant Order</button>
+          </form>
+
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Table</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {restaurantOrders.map((order) => (
+                  <tr key={order.id}>
+                    <td>{order.id}</td>
+                    <td>{order.table}</td>
+                    <td>{currency.format(order.amount)}</td>
+                    <td>
+                      <span className={`badge ${order.status === 'paid' ? 'checked-in' : 'reserved'}`}>{order.status}</span>
+                    </td>
+                    <td className="actions">
+                      {order.status !== 'paid' && <button onClick={() => payRestaurantOrder(order.id)}>Mark Paid</button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+
+        <Panel title="Mail / Message Alerts">
+          <form className="stack" onSubmit={sendAlert}>
+            <select name="channel" defaultValue="Email">
+              <option>Email</option>
+              <option>SMS</option>
+            </select>
+            <input name="recipient" placeholder="Email or phone" required />
+            <textarea name="message" placeholder="Message" rows={2} required />
+            <button type="submit">Send Alert</button>
+          </form>
+          <ul className="list compact">
+            {alerts.map((alert) => (
+              <li key={alert.id}>
+                <strong>{alert.channel}</strong> to {alert.recipient} - {alert.message} ({alert.deliveryStatus})
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      </section>
+
+      <section className="layout-two">
         <Panel title="History of Bookings">
           <div className="table-wrap">
             <table>
@@ -383,22 +499,16 @@ function App() {
           </div>
         </Panel>
 
-        <Panel title="Mail / Message Alerts">
-          <form className="stack" onSubmit={sendAlert}>
-            <select name="channel" defaultValue="Email">
-              <option>Email</option>
-              <option>SMS</option>
-            </select>
-            <input name="recipient" placeholder="Email or phone" required />
-            <textarea name="message" placeholder="Message" rows={2} required />
-            <button type="submit">Send Alert</button>
-          </form>
+        <Panel title="Restaurant Open Orders">
           <ul className="list compact">
-            {alerts.map((alert) => (
-              <li key={alert.id}>
-                <strong>{alert.channel}</strong> to {alert.recipient} - {alert.message} ({alert.deliveryStatus})
-              </li>
-            ))}
+            {restaurantOrders.filter((order) => order.status !== 'paid').length === 0 && <li>No open restaurant orders.</li>}
+            {restaurantOrders
+              .filter((order) => order.status !== 'paid')
+              .map((order) => (
+                <li key={order.id}>
+                  <strong>{order.id}</strong> | Table {order.table} | {order.itemSummary} | {currency.format(order.amount)}
+                </li>
+              ))}
           </ul>
         </Panel>
       </section>

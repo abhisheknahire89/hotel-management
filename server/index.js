@@ -2,7 +2,7 @@ import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
 import { sendEmail, sendSms } from './notify.js';
-import { isCloudMode, nextId, readState, updateState } from './store.js';
+import { nextId, readState, storageMode, updateState } from './store.js';
 
 const app = express();
 const port = Number(process.env.API_PORT || 8787);
@@ -13,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, now: new Date().toISOString(), storage: isCloudMode() ? 'mongo' : 'file' });
+  res.json({ ok: true, now: new Date().toISOString(), storage: storageMode() });
 });
 
 app.get('/api/bootstrap', async (_req, res) => {
@@ -194,6 +194,76 @@ app.post('/api/bookings/:id/check-out', async (req, res) => {
   }
 });
 
+app.post('/api/restaurant/orders', async (req, res) => {
+  const payload = req.body || {};
+  const order = {
+    guestId: payload.guestId ? String(payload.guestId).trim() : null,
+    roomNumber: payload.roomNumber ? Number(payload.roomNumber) : null,
+    table: String(payload.table || '').trim(),
+    itemSummary: String(payload.itemSummary || '').trim(),
+    amount: Number(payload.amount),
+  };
+
+  if (!order.table || !order.itemSummary || !order.amount) {
+    return res.status(400).json({ error: 'Table, item summary, and amount are required.' });
+  }
+
+  try {
+    const state = await readState();
+    const created = {
+      id: nextId(state.restaurantOrders || [], 'R'),
+      ...order,
+      status: 'open',
+      orderedAt: new Date().toISOString(),
+      paidAt: null,
+    };
+
+    await updateState((current) => ({
+      ...current,
+      restaurantOrders: [created, ...(current.restaurantOrders || [])],
+    }));
+
+    return res.status(201).json(created);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/restaurant/orders/:id/pay', async (req, res) => {
+  const orderId = String(req.params.id || '').trim();
+
+  let updated = null;
+  let error = null;
+
+  try {
+    await updateState((state) => {
+      const currentOrders = state.restaurantOrders || [];
+      const target = currentOrders.find((order) => order.id === orderId);
+      if (!target) {
+        error = 'Restaurant order not found.';
+        return state;
+      }
+
+      if (target.status === 'paid') {
+        error = 'Restaurant order is already paid.';
+        return state;
+      }
+
+      const nextOrders = currentOrders.map((order) =>
+        order.id === orderId ? { ...order, status: 'paid', paidAt: new Date().toISOString() } : order,
+      );
+
+      updated = nextOrders.find((order) => order.id === orderId);
+      return { ...state, restaurantOrders: nextOrders };
+    });
+
+    if (error) return res.status(400).json({ error });
+    return res.json(updated);
+  } catch (caught) {
+    return res.status(500).json({ error: caught.message });
+  }
+});
+
 app.post('/api/alerts/send', async (req, res) => {
   const payload = req.body || {};
   const channel = String(payload.channel || '').trim();
@@ -207,7 +277,7 @@ app.post('/api/alerts/send', async (req, res) => {
   try {
     const state = await readState();
     const alert = {
-      id: nextId(state.alerts, 'A'),
+      id: nextId(state.alerts || [], 'A'),
       channel,
       recipient,
       message,
@@ -228,7 +298,7 @@ app.post('/api/alerts/send', async (req, res) => {
       alert.providerMeta = { error: sendError.message };
     }
 
-    await updateState((current) => ({ ...current, alerts: [alert, ...current.alerts] }));
+    await updateState((current) => ({ ...current, alerts: [alert, ...(current.alerts || [])] }));
 
     if (alert.deliveryStatus === 'failed') {
       return res.status(502).json({
@@ -244,5 +314,5 @@ app.post('/api/alerts/send', async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`API listening on http://localhost:${port} (${isCloudMode() ? 'mongo' : 'file'} storage)`);
+  console.log(`API listening on http://localhost:${port} (${storageMode()} storage)`);
 });

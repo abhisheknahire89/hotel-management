@@ -1,42 +1,48 @@
 # Hotel Management Software (React + Vite + Node API)
 
-## What you asked for
-Shared online data so users on different devices see the same records.
+## What is now included
+1. Shared online data storage using Supabase (cross-device)
+2. Email delivery using Resend
+3. Hotel front-desk workflow
+4. Ground-floor restaurant operations (orders + payment status)
 
-## How this is now implemented
-1. Frontend calls backend APIs (`/api/*`) for all operations.
-2. Backend supports two storage modes:
-   - Cloud mode: MongoDB via `MONGODB_URI` (recommended for multi-device access)
-   - Local mode: `server/data/db.json` fallback
-3. When deployed with `MONGODB_URI`, all devices share the same live database.
+## Shared data behavior
+- Frontend reads/writes via backend APIs (`/api/*`).
+- Backend storage modes:
+  - `supabase` mode when `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are configured
+  - `file` fallback (`server/data/db.json`) when Supabase env vars are missing
+- In `supabase` mode, data is shared across all devices/users.
 
-## Features
-1. Digitized front desk dashboard
-2. Shared backend persistence
-3. Guest management
-4. Reservation creation with overlap validation
-5. Check-in / check-out lifecycle
-6. Alert delivery logging with real integrations:
-   - Email via SMTP
-   - SMS via Twilio
-7. Booking history + calendar timeline
-8. Report generation
+## Restaurant module
+- Create restaurant orders (table, items, amount, optional guest/room link)
+- Mark orders as paid
+- Restaurant revenue shown in dashboard KPIs
 
-## Environment setup
-Create `.env` from `.env.example`:
+## Notifications
+- Email via Resend (`RESEND_API_KEY`, `RESEND_FROM`)
+- SMS via Twilio (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`)
 
-```bash
-cp .env.example .env
+## Supabase setup
+1. Create a Supabase project.
+2. Run this SQL in Supabase SQL editor:
+
+```sql
+create table if not exists app_state (
+  key text primary key,
+  data jsonb not null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
 ```
 
-Required for cloud/shared data:
-- `MONGODB_URI` (MongoDB Atlas recommended)
+3. Copy `.env.example` to `.env` and set:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `RESEND_API_KEY`
+- `RESEND_FROM`
+- Twilio vars (if SMS needed)
 
-Required for notifications:
-- SMTP: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
-- Twilio: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`
-
-## Run locally
+## Local run
 ```bash
 npm install
 npm run dev
@@ -45,17 +51,13 @@ npm run dev
 - Frontend: `http://localhost:5173`
 - API: `http://localhost:8787`
 
-## Deploy for multi-device use
-1. Deploy backend (Railway/Render/Fly/EC2).
-2. Set backend env vars including `MONGODB_URI`.
-3. Deploy frontend (Vercel/Netlify) and point API base URL to your backend domain.
-4. Open frontend URL from any device; all users will see same data.
-
 ## Scripts
 - `npm run dev` -> start web + API together
 - `npm run dev:api` -> API in watch mode
 - `npm run start:api` -> API normal mode
 - `npm run build` -> production frontend build
 
-## Notes
-- If `MONGODB_URI` is missing, backend uses local JSON file (`server/data/db.json`), which is not shared across hosted instances.
+## Deployment for cross-device use
+1. Deploy backend (Render/Railway/Fly/etc) with Supabase + Resend env vars.
+2. Deploy frontend and point it to backend API domain.
+3. Access from any device; same data appears everywhere.

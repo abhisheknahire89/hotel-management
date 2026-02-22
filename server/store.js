@@ -1,15 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import mongoose from 'mongoose';
+import { createClient } from '@supabase/supabase-js';
 import { createSeedData } from './seed.js';
-import { StateModel } from './stateModel.js';
 
 const DATA_DIR = path.resolve('server/data');
 const DATA_FILE = path.join(DATA_DIR, 'db.json');
 const STATE_KEY = 'hotel-core-state';
-const useMongo = Boolean(process.env.MONGODB_URI);
 
-let mongoReady = false;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const useSupabase = Boolean(supabaseUrl && supabaseKey);
+
+const supabase = useSupabase ? createClient(supabaseUrl, supabaseKey) : null;
 
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -32,47 +34,43 @@ function writeFileState(nextState) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(nextState, null, 2));
 }
 
-async function initMongo() {
-  if (!useMongo || mongoReady) return;
+async function ensureSupabaseState() {
+  const { data, error } = await supabase
+    .from('app_state')
+    .select('key,data')
+    .eq('key', STATE_KEY)
+    .maybeSingle();
 
-  await mongoose.connect(process.env.MONGODB_URI, {
-    serverSelectionTimeoutMS: 10000,
-  });
+  if (error) throw new Error(`Supabase read error: ${error.message}`);
 
-  const existing = await StateModel.findOne({ key: STATE_KEY }).lean();
-  if (!existing) {
-    await StateModel.create({ key: STATE_KEY, data: createSeedData() });
+  if (!data) {
+    const seed = createSeedData();
+    const { error: insertError } = await supabase.from('app_state').insert({ key: STATE_KEY, data: seed });
+    if (insertError) throw new Error(`Supabase seed error: ${insertError.message}`);
+    return seed;
   }
 
-  mongoReady = true;
+  return data.data;
 }
 
 export async function readState() {
-  if (!useMongo) {
+  if (!useSupabase) {
     return readFileState();
   }
 
-  await initMongo();
-  const doc = await StateModel.findOne({ key: STATE_KEY }).lean();
-  return doc?.data || createSeedData();
+  return ensureSupabaseState();
 }
 
 export async function writeState(nextState) {
-  if (!useMongo) {
+  if (!useSupabase) {
     writeFileState(nextState);
     return;
   }
 
-  await initMongo();
-  await StateModel.updateOne(
-    { key: STATE_KEY },
-    {
-      $set: {
-        data: nextState,
-      },
-    },
-    { upsert: true },
-  );
+  await ensureSupabaseState();
+  const { error } = await supabase.from('app_state').update({ data: nextState }).eq('key', STATE_KEY);
+
+  if (error) throw new Error(`Supabase write error: ${error.message}`);
 }
 
 export async function updateState(updater) {
@@ -91,6 +89,6 @@ export function nextId(collection, prefix, start = 1) {
   return `${prefix}-${String(max + 1).padStart(3, '0')}`;
 }
 
-export function isCloudMode() {
-  return useMongo;
+export function storageMode() {
+  return useSupabase ? 'supabase' : 'file';
 }

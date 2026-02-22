@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import twilio from 'twilio';
 
 function required(value, label) {
@@ -7,27 +7,22 @@ function required(value, label) {
 }
 
 export async function sendEmail({ to, message }) {
-  const host = required(process.env.SMTP_HOST, 'SMTP_HOST');
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = required(process.env.SMTP_USER, 'SMTP_USER');
-  const pass = required(process.env.SMTP_PASS, 'SMTP_PASS');
-  const from = required(process.env.SMTP_FROM, 'SMTP_FROM');
+  const apiKey = required(process.env.RESEND_API_KEY, 'RESEND_API_KEY');
+  const from = required(process.env.RESEND_FROM, 'RESEND_FROM');
 
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-  });
-
-  const info = await transporter.sendMail({
+  const resend = new Resend(apiKey);
+  const result = await resend.emails.send({
     from,
     to,
     subject: 'Hotel Front Desk Alert',
     text: message,
   });
 
-  return { messageId: info.messageId };
+  if (result.error) {
+    throw new Error(result.error.message || 'Resend failed');
+  }
+
+  return { id: result.data?.id || null };
 }
 
 export async function sendSms({ to, message }) {

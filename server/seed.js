@@ -97,5 +97,29 @@ export function createSeedData() {
         deliveryStatus: 'seeded',
       },
     ],
+    restaurantOrders: [
+      {
+        id: 'R-001',
+        guestId: 'G-001',
+        roomNumber: 301,
+        table: 'G-04',
+        itemSummary: 'Pasta + Lemon Soda',
+        amount: 950,
+        status: 'paid',
+        orderedAt: new Date().toISOString(),
+        paidAt: new Date().toISOString(),
+      },
+      {
+        id: 'R-002',
+        guestId: null,
+        roomNumber: null,
+        table: 'G-02',
+        itemSummary: 'Family Thali x2',
+        amount: 1200,
+        status: 'open',
+        orderedAt: new Date(Date.now() - 40 * 60000).toISOString(),
+        paidAt: null,
+      },
+    ],
   };
 }
