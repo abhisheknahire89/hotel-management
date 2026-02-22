@@ -1,66 +1,61 @@
 # Hotel Management Software (React + Vite + Node API)
 
-## Operational features
+## What you asked for
+Shared online data so users on different devices see the same records.
+
+## How this is now implemented
+1. Frontend calls backend APIs (`/api/*`) for all operations.
+2. Backend supports two storage modes:
+   - Cloud mode: MongoDB via `MONGODB_URI` (recommended for multi-device access)
+   - Local mode: `server/data/db.json` fallback
+3. When deployed with `MONGODB_URI`, all devices share the same live database.
+
+## Features
 1. Digitized front desk dashboard
-2. Shared backend data persistence (JSON DB on server)
-3. Reservation creation with date and room-conflict validation
-4. Check-in / check-out lifecycle controls
-5. Live KPI statistics dashboard
-6. Guests expected today view
-7. Booking history
-8. Calendar-based reservation timeline
-9. Real notification integrations:
+2. Shared backend persistence
+3. Guest management
+4. Reservation creation with overlap validation
+5. Check-in / check-out lifecycle
+6. Alert delivery logging with real integrations:
    - Email via SMTP
    - SMS via Twilio
-10. One-click report generation (monthly / quarterly / yearly)
-11. Mobile + web responsive layout
+7. Booking history + calendar timeline
+8. Report generation
 
-## User workflow (front desk)
-1. Add guest in **Manage Guest Information**.
-2. Create reservation in **Create Reservation**.
-3. Process arrivals/departures in **Check-in / Check-out**.
-4. Send communication updates from **Mail / Message Alerts**.
-5. Monitor **Guests Expected Today**, **Booking History**, and **Calendar Timeline**.
-6. Generate reports in **One-Click Reports**.
+## Environment setup
+Create `.env` from `.env.example`:
 
-## Data storage
-- Main data is stored on the server at:
-  - `server/data/db.json`
-- This means all users connected to the same deployed backend see the same data.
-- If API is unavailable, the UI falls back to local seed data (read-only operational fallback mode).
-
-## Local setup
-1. Install deps:
-```bash
-npm install
-```
-
-2. Configure env:
 ```bash
 cp .env.example .env
 ```
 
-3. Fill `.env` with real SMTP/Twilio credentials.
+Required for cloud/shared data:
+- `MONGODB_URI` (MongoDB Atlas recommended)
 
-4. Start frontend + backend together:
+Required for notifications:
+- SMTP: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+- Twilio: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`
+
+## Run locally
 ```bash
+npm install
 npm run dev
 ```
 
 - Frontend: `http://localhost:5173`
 - API: `http://localhost:8787`
 
-## API scripts
-- `npm run dev:api` -> start API in watch mode
-- `npm run start:api` -> start API normally
+## Deploy for multi-device use
+1. Deploy backend (Railway/Render/Fly/EC2).
+2. Set backend env vars including `MONGODB_URI`.
+3. Deploy frontend (Vercel/Netlify) and point API base URL to your backend domain.
+4. Open frontend URL from any device; all users will see same data.
 
-## Build web app
-```bash
-npm run build
-npm run preview
-```
+## Scripts
+- `npm run dev` -> start web + API together
+- `npm run dev:api` -> API in watch mode
+- `npm run start:api` -> API normal mode
+- `npm run build` -> production frontend build
 
-## Notification behavior
-- Email alerts require valid SMTP credentials.
-- SMS alerts require valid Twilio credentials.
-- Failed sends are still logged in alert history with `deliveryStatus: failed`.
+## Notes
+- If `MONGODB_URI` is missing, backend uses local JSON file (`server/data/db.json`), which is not shared across hosted instances.
