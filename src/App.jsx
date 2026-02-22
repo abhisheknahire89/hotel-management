@@ -1,22 +1,38 @@
 import { useEffect, useMemo, useState } from 'react';
 import { initialAlerts, initialBookings, initialGuests, initialRooms } from './data';
 import { getGuestsCountToday, getOccupancyRate, getRevenuePerRoom, getTodayIncome, generateReport } from './utils/metrics';
-import { usePersistentState } from './utils/storage';
 import './styles.css';
 
 const currency = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
-
 const toIsoDate = (value = new Date()) => new Date(value).toISOString().slice(0, 10);
+
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.error || 'Request failed');
+    error.data = data;
+    throw error;
+  }
+
+  return data;
+}
 
 function App() {
   const todayIso = toIsoDate();
-  const [rooms] = usePersistentState('hms-rooms', initialRooms);
-  const [guests, setGuests] = usePersistentState('hms-guests', initialGuests);
-  const [bookings, setBookings] = usePersistentState('hms-bookings', initialBookings);
-  const [alerts, setAlerts] = usePersistentState('hms-alerts', initialAlerts);
+  const [rooms, setRooms] = useState([]);
+  const [guests, setGuests] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const [report, setReport] = useState(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [notice, setNotice] = useState({ type: 'info', message: '' });
+  const [loading, setLoading] = useState(true);
+  const [syncMode, setSyncMode] = useState('server');
 
   useEffect(() => {
     const onOnline = () => setOnline(true);
@@ -29,6 +45,30 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await apiRequest('/api/bootstrap');
+        setRooms(data.rooms || []);
+        setGuests(data.guests || []);
+        setBookings(data.bookings || []);
+        setAlerts(data.alerts || []);
+        setSyncMode('server');
+      } catch (_error) {
+        setRooms(initialRooms);
+        setGuests(initialGuests);
+        setBookings(initialBookings);
+        setAlerts(initialAlerts);
+        setSyncMode('fallback');
+        setNotice({ type: 'error', message: 'API not reachable. Running with local fallback data only.' });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, []);
+
   const guestsById = useMemo(() => Object.fromEntries(guests.map((guest) => [guest.id, guest])), [guests]);
 
   const summary = useMemo(() => {
@@ -36,7 +76,6 @@ function App() {
     const occupancyRate = getOccupancyRate(bookings, rooms, todayIso);
     const revenuePerRoom = getRevenuePerRoom(bookings, rooms, todayIso);
     const numberOfGuests = getGuestsCountToday(bookings, todayIso);
-
     return { todayIncome, occupancyRate, revenuePerRoom, numberOfGuests };
   }, [bookings, rooms, todayIso]);
 
@@ -50,149 +89,107 @@ function App() {
     [bookings],
   );
 
-  const setFeedback = (type, message) => {
-    setNotice({ type, message });
-  };
+  const setFeedback = (type, message) => setNotice({ type, message });
 
-  const isRoomBooked = (roomNumber, checkIn, checkOut) => {
-    return bookings.some((booking) => {
-      if (booking.roomNumber !== roomNumber) return false;
-      if (booking.status === 'checked-out') return false;
-      return checkIn < booking.checkOut && checkOut > booking.checkIn;
-    });
-  };
-
-  const checkIn = (bookingId) => {
-    const target = bookings.find((booking) => booking.id === bookingId);
-    if (!target) {
-      setFeedback('error', 'Booking not found.');
-      return;
+  const checkIn = async (bookingId) => {
+    try {
+      const updated = await apiRequest(`/api/bookings/${bookingId}/check-in`, { method: 'POST' });
+      setBookings((current) => current.map((booking) => (booking.id === updated.id ? updated : booking)));
+      setFeedback('success', `${updated.id} checked in successfully.`);
+    } catch (error) {
+      setFeedback('error', error.message);
     }
-
-    if (target.checkIn > todayIso) {
-      setFeedback('error', `Check-in is available from ${target.checkIn}.`);
-      return;
-    }
-
-    setBookings((current) =>
-      current.map((booking) => (booking.id === bookingId ? { ...booking, status: 'checked-in' } : booking)),
-    );
-    setFeedback('success', `${target.id} checked in successfully.`);
   };
 
-  const checkOut = (bookingId) => {
-    const target = bookings.find((booking) => booking.id === bookingId);
-    if (!target) {
-      setFeedback('error', 'Booking not found.');
-      return;
+  const checkOut = async (bookingId) => {
+    try {
+      const updated = await apiRequest(`/api/bookings/${bookingId}/check-out`, { method: 'POST' });
+      setBookings((current) => current.map((booking) => (booking.id === updated.id ? updated : booking)));
+      setFeedback('success', `${updated.id} checked out and payment recorded.`);
+    } catch (error) {
+      setFeedback('error', error.message);
     }
-
-    setBookings((current) =>
-      current.map((booking) =>
-        booking.id === bookingId
-          ? { ...booking, status: 'checked-out', paymentDate: todayIso, checkOut: booking.checkOut < todayIso ? todayIso : booking.checkOut }
-          : booking,
-      ),
-    );
-    setFeedback('success', `${target.id} checked out and payment recorded.`);
   };
 
-  const addGuest = (event) => {
+  const addGuest = async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    const id = `G-${String(guests.length + 1).padStart(3, '0')}`;
-    const guest = {
-      id,
-      name: formData.get('name').trim(),
-      email: formData.get('email').trim(),
-      phone: formData.get('phone').trim(),
-      idProof: formData.get('idProof').trim(),
+
+    const payload = {
+      name: String(formData.get('name') || '').trim(),
+      email: String(formData.get('email') || '').trim(),
+      phone: String(formData.get('phone') || '').trim(),
+      idProof: String(formData.get('idProof') || '').trim(),
       vip: formData.get('vip') === 'on',
-      notes: formData.get('notes').trim(),
+      notes: String(formData.get('notes') || '').trim(),
     };
 
-    if (!guest.name || !guest.email || !guest.phone || !guest.idProof) {
-      setFeedback('error', 'Name, email, phone, and ID proof are required.');
-      return;
-    }
+    try {
+      const created = await apiRequest('/api/guests', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
 
-    const duplicateEmail = guests.some((currentGuest) => currentGuest.email.toLowerCase() === guest.email.toLowerCase());
-    if (duplicateEmail) {
-      setFeedback('error', `Guest with email ${guest.email} already exists.`);
-      return;
+      setGuests((current) => [created, ...current]);
+      event.currentTarget.reset();
+      setFeedback('success', `${created.name} added with ID ${created.id}.`);
+    } catch (error) {
+      setFeedback('error', error.message);
     }
-
-    setGuests((current) => [guest, ...current]);
-    event.currentTarget.reset();
-    setFeedback('success', `${guest.name} added with ID ${guest.id}.`);
   };
 
-  const addBooking = (event) => {
+  const addBooking = async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
 
-    const guestId = formData.get('guestId');
-    const roomNumber = Number(formData.get('roomNumber'));
-    const checkInDate = formData.get('checkIn');
-    const checkOutDate = formData.get('checkOut');
-    const totalAmount = Number(formData.get('totalAmount'));
-
-    const booking = {
-      id: `B-${1000 + bookings.length + 1}`,
-      guestId,
-      roomNumber,
-      checkIn: checkInDate,
-      checkOut: checkOutDate,
-      status: 'reserved',
-      source: formData.get('source'),
-      totalAmount,
-      paymentDate: null,
+    const payload = {
+      guestId: String(formData.get('guestId') || '').trim(),
+      roomNumber: Number(formData.get('roomNumber')),
+      checkIn: String(formData.get('checkIn') || '').trim(),
+      checkOut: String(formData.get('checkOut') || '').trim(),
+      source: String(formData.get('source') || 'Website').trim(),
+      totalAmount: Number(formData.get('totalAmount')),
     };
 
-    if (!booking.guestId || !booking.roomNumber || !booking.checkIn || !booking.checkOut || !booking.totalAmount) {
-      setFeedback('error', 'Guest, room, dates, and amount are required to create a booking.');
-      return;
-    }
+    try {
+      const created = await apiRequest('/api/bookings', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
 
-    if (booking.checkOut <= booking.checkIn) {
-      setFeedback('error', 'Check-out date must be after check-in date.');
-      return;
+      setBookings((current) => [created, ...current]);
+      event.currentTarget.reset();
+      setFeedback('success', `${created.id} created for room ${created.roomNumber}.`);
+    } catch (error) {
+      setFeedback('error', error.message);
     }
-
-    if (!guestsById[booking.guestId]) {
-      setFeedback('error', 'Selected guest does not exist. Please choose a valid guest.');
-      return;
-    }
-
-    if (isRoomBooked(booking.roomNumber, booking.checkIn, booking.checkOut)) {
-      setFeedback('error', `Room ${booking.roomNumber} is already booked for those dates.`);
-      return;
-    }
-
-    setBookings((current) => [booking, ...current]);
-    event.currentTarget.reset();
-    setFeedback('success', `${booking.id} created for room ${booking.roomNumber}.`);
   };
 
-  const sendAlert = (event) => {
+  const sendAlert = async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    const alert = {
-      id: `A-${alerts.length + 1}`,
-      channel: formData.get('channel'),
-      recipient: formData.get('recipient').trim(),
-      message: formData.get('message').trim(),
-      time: new Date().toISOString(),
+
+    const payload = {
+      channel: String(formData.get('channel') || '').trim(),
+      recipient: String(formData.get('recipient') || '').trim(),
+      message: String(formData.get('message') || '').trim(),
     };
 
-    if (!alert.recipient || !alert.message) {
-      setFeedback('error', 'Recipient and message are required for alerts.');
-      return;
-    }
+    try {
+      const created = await apiRequest('/api/alerts/send', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
 
-    setAlerts((current) => [alert, ...current]);
-    event.currentTarget.reset();
-    setFeedback('success', `${alert.channel} alert queued for ${alert.recipient}.`);
+      setAlerts((current) => [created, ...current]);
+      event.currentTarget.reset();
+      setFeedback('success', `${created.channel} alert sent to ${created.recipient}.`);
+    } catch (error) {
+      if (error.data?.alert) {
+        setAlerts((current) => [error.data.alert, ...current]);
+      }
+      setFeedback('error', error.message);
+    }
   };
 
   const generate = (period) => {
@@ -200,13 +197,28 @@ function App() {
     setFeedback('success', `${period[0].toUpperCase() + period.slice(1)} report generated.`);
   };
 
+  if (loading) {
+    return (
+      <div className="app-shell">
+        <section className="panel">
+          <h3>Loading Hotel Dashboard...</h3>
+          <p>Connecting to server and loading live data.</p>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <header className="hero">
         <div>
           <p className="eyebrow">Digitized Front Desk Platform</p>
           <h1>Hotel Management Software</h1>
-          <p className="muted">Mobile + web access with local caching for low internet environments.</p>
+          <p className="muted">
+            Mobile + web access with shared backend storage.
+            {' '}
+            {syncMode === 'server' ? 'Server sync active.' : 'Local fallback mode.'}
+          </p>
         </div>
         <div className={online ? 'status online' : 'status offline'}>{online ? 'Online Sync Active' : 'Offline Mode Active'}</div>
       </header>
@@ -384,7 +396,7 @@ function App() {
           <ul className="list compact">
             {alerts.map((alert) => (
               <li key={alert.id}>
-                <strong>{alert.channel}</strong> to {alert.recipient} - {alert.message}
+                <strong>{alert.channel}</strong> to {alert.recipient} - {alert.message} ({alert.deliveryStatus})
               </li>
             ))}
           </ul>
