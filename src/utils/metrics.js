@@ -7,7 +7,7 @@ export function getTodayIncome(bookings, todayIso) {
 export function getRestaurantIncomeToday(restaurantOrders, todayIso) {
   return restaurantOrders
     .filter((order) => order.status === 'paid' && String(order.paidAt || '').slice(0, 10) === todayIso)
-    .reduce((sum, order) => sum + order.amount, 0);
+    .reduce((sum, order) => sum + (order.totalAmount || order.amount || 0), 0);
 }
 
 export function getOccupiedRooms(bookings, todayIso) {

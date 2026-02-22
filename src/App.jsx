@@ -35,7 +35,12 @@ function App() {
   const [guests, setGuests] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [restaurantMenu, setRestaurantMenu] = useState([]);
   const [restaurantOrders, setRestaurantOrders] = useState([]);
+  const [orderItemsDraft, setOrderItemsDraft] = useState([]);
+  const [menuPickId, setMenuPickId] = useState('');
+  const [menuPickQty, setMenuPickQty] = useState(1);
+  const [paymentModes, setPaymentModes] = useState({});
   const [report, setReport] = useState(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [notice, setNotice] = useState({ type: 'info', message: '' });
@@ -61,6 +66,7 @@ function App() {
         setGuests(data.guests || []);
         setBookings(data.bookings || []);
         setAlerts(data.alerts || []);
+        setRestaurantMenu(data.restaurantMenu || []);
         setRestaurantOrders(data.restaurantOrders || []);
         setSyncMode('server');
       } catch (_error) {
@@ -68,6 +74,7 @@ function App() {
         setGuests(initialGuests);
         setBookings(initialBookings);
         setAlerts(initialAlerts);
+        setRestaurantMenu([]);
         setRestaurantOrders([]);
         setSyncMode('fallback');
         setNotice({ type: 'error', message: 'API not reachable. Running with local fallback data only.' });
@@ -80,6 +87,7 @@ function App() {
   }, []);
 
   const guestsById = useMemo(() => Object.fromEntries(guests.map((guest) => [guest.id, guest])), [guests]);
+  const menuById = useMemo(() => Object.fromEntries(restaurantMenu.map((item) => [item.id, item])), [restaurantMenu]);
 
   const summary = useMemo(() => {
     const todayIncome = getTodayIncome(bookings, todayIso);
@@ -98,6 +106,16 @@ function App() {
   const bookingHistory = useMemo(
     () => [...bookings].filter((booking) => booking.status === 'checked-out').sort((a, b) => b.checkOut.localeCompare(a.checkOut)),
     [bookings],
+  );
+
+  const openRestaurantOrders = useMemo(
+    () => restaurantOrders.filter((order) => order.status !== 'paid'),
+    [restaurantOrders],
+  );
+
+  const paidRestaurantOrders = useMemo(
+    () => restaurantOrders.filter((order) => order.status === 'paid').slice(0, 12),
+    [restaurantOrders],
   );
 
   const setFeedback = (type, message) => setNotice({ type, message });
@@ -203,21 +221,73 @@ function App() {
     }
   };
 
-  const generate = (period) => {
-    setReport(generateReport(bookings, guests, period));
-    setFeedback('success', `${period[0].toUpperCase() + period.slice(1)} report generated.`);
+  const addDraftItem = () => {
+    const menuId = String(menuPickId || '').trim();
+    const qty = Number(menuPickQty);
+    if (!menuId || !Number.isFinite(qty) || qty <= 0) {
+      setFeedback('error', 'Select menu item and valid quantity.');
+      return;
+    }
+
+    const menuItem = menuById[menuId];
+    if (!menuItem) {
+      setFeedback('error', 'Invalid menu item selected.');
+      return;
+    }
+
+    setOrderItemsDraft((current) => {
+      const existing = current.find((item) => item.menuId === menuId);
+      if (existing) {
+        return current.map((item) => (item.menuId === menuId ? { ...item, qty: item.qty + qty } : item));
+      }
+      return [...current, { menuId, qty }];
+    });
+    setMenuPickQty(1);
   };
 
-  const addRestaurantOrder = async (event) => {
+  const removeDraftItem = (menuId) => {
+    setOrderItemsDraft((current) => current.filter((item) => item.menuId !== menuId));
+  };
+
+  const importMenuFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const payload = Array.isArray(parsed) ? parsed : parsed.items;
+
+      const result = await apiRequest('/api/restaurant/menu/import', {
+        method: 'POST',
+        body: JSON.stringify({ items: payload }),
+      });
+
+      setRestaurantMenu(result.menu || []);
+      setFeedback('success', `Menu imported successfully (${result.count} items).`);
+    } catch (error) {
+      setFeedback('error', `Menu import failed: ${error.message}`);
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const createRestaurantOrder = async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
 
+    if (orderItemsDraft.length === 0) {
+      setFeedback('error', 'Add at least one menu item to create restaurant order.');
+      return;
+    }
+
     const payload = {
+      table: String(formData.get('table') || '').trim(),
       guestId: String(formData.get('guestId') || '').trim() || null,
       roomNumber: Number(formData.get('roomNumber')) || null,
-      table: String(formData.get('table') || '').trim(),
-      itemSummary: String(formData.get('itemSummary') || '').trim(),
-      amount: Number(formData.get('amount')),
+      billedBy: String(formData.get('billedBy') || 'Restaurant Cashier').trim(),
+      notes: String(formData.get('notes') || '').trim(),
+      items: orderItemsDraft,
     };
 
     try {
@@ -225,22 +295,35 @@ function App() {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+
       setRestaurantOrders((current) => [created, ...current]);
+      setOrderItemsDraft([]);
+      setMenuPickId('');
+      setMenuPickQty(1);
       event.currentTarget.reset();
-      setFeedback('success', `Restaurant order ${created.id} created for table ${created.table}.`);
+      setFeedback('success', `Restaurant bill ${created.id} created for table ${created.table}.`);
     } catch (error) {
       setFeedback('error', error.message);
     }
   };
 
   const payRestaurantOrder = async (orderId) => {
+    const paymentMode = paymentModes[orderId] || 'Cash';
     try {
-      const updated = await apiRequest(`/api/restaurant/orders/${orderId}/pay`, { method: 'POST' });
+      const updated = await apiRequest(`/api/restaurant/orders/${orderId}/pay`, {
+        method: 'POST',
+        body: JSON.stringify({ paymentMode }),
+      });
       setRestaurantOrders((current) => current.map((order) => (order.id === updated.id ? updated : order)));
-      setFeedback('success', `Restaurant order ${updated.id} marked as paid.`);
+      setFeedback('success', `Restaurant order ${updated.id} marked as paid via ${paymentMode}.`);
     } catch (error) {
       setFeedback('error', error.message);
     }
+  };
+
+  const generate = (period) => {
+    setReport(generateReport(bookings, guests, period));
+    setFeedback('success', `${period[0].toUpperCase() + period.slice(1)} report generated.`);
   };
 
   if (loading) {
@@ -275,17 +358,17 @@ function App() {
         <h3>User Workflow</h3>
         <ol>
           <li>Add or verify guest details in "Manage Guest Information".</li>
-          <li>Create a reservation in "Create Reservation" (conflicts are blocked automatically).</li>
-          <li>Use "Check-in / Check-out" to move booking status through stay lifecycle.</li>
-          <li>Manage ground-floor restaurant orders and mark bills paid.</li>
-          <li>Track expected arrivals, booking history, and send alerts when needed.</li>
-          <li>Review calendar and generate monthly/quarterly/yearly reports.</li>
+          <li>Create reservations and process check-in/check-out.</li>
+          <li>Restaurant manager uploads/updates menu (JSON import).</li>
+          <li>Create restaurant bills by selecting menu items and quantities.</li>
+          <li>Manage open bills and close payments with payment mode.</li>
+          <li>Use alerts, reports, and calendar for daily operations.</li>
         </ol>
       </section>
 
       <section className="stats-grid">
-        <StatCard title="Today's Income" value={currency.format(summary.todayIncome)} />
-        <StatCard title="Restaurant Income" value={currency.format(summary.restaurantIncome)} />
+        <StatCard title="Today's Room Income" value={currency.format(summary.todayIncome)} />
+        <StatCard title="Today's Restaurant Income" value={currency.format(summary.restaurantIncome)} />
         <StatCard title="Revenue / Room" value={currency.format(summary.revenuePerRoom)} />
         <StatCard title="Occupancy Rate" value={`${summary.occupancyRate}%`} />
         <StatCard title="No. of Guests" value={String(summary.numberOfGuests)} />
@@ -347,28 +430,6 @@ function App() {
             </label>
             <button type="submit">Add Guest</button>
           </form>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Name</th>
-                  <th>Contact</th>
-                  <th>VIP</th>
-                </tr>
-              </thead>
-              <tbody>
-                {guests.map((guest) => (
-                  <tr key={guest.id}>
-                    <td>{guest.id}</td>
-                    <td>{guest.name}</td>
-                    <td>{guest.phone}</td>
-                    <td>{guest.vip ? 'Yes' : 'No'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </Panel>
 
         <Panel title="Create Reservation">
@@ -404,11 +465,36 @@ function App() {
       </section>
 
       <section className="layout-two">
-        <Panel title="Ground Floor Restaurant">
-          <form className="stack" onSubmit={addRestaurantOrder}>
-            <input name="table" placeholder="Table number (e.g. G-04)" required />
-            <input name="itemSummary" placeholder="Items ordered" required />
-            <input type="number" name="amount" placeholder="Bill amount" min="0" required />
+        <Panel title="Restaurant Menu Management">
+          <p className="tiny">Upload JSON menu and replace existing menu catalog.</p>
+          <input type="file" accept="application/json" onChange={importMenuFile} />
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Item</th>
+                  <th>Category</th>
+                  <th>Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {restaurantMenu.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.id}</td>
+                    <td>{item.name}</td>
+                    <td>{item.category}</td>
+                    <td>{currency.format(item.price)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+
+        <Panel title="Create Restaurant Bill">
+          <form className="stack" onSubmit={createRestaurantOrder}>
+            <input name="table" placeholder="Table number (e.g. G-03)" required />
             <select name="guestId" defaultValue="">
               <option value="">Optional: Link guest</option>
               {guests.map((guest) => (
@@ -418,31 +504,83 @@ function App() {
               ))}
             </select>
             <input type="number" name="roomNumber" placeholder="Optional: Room number" min="0" />
-            <button type="submit">Create Restaurant Order</button>
-          </form>
+            <input name="billedBy" placeholder="Billed by" defaultValue="Restaurant Cashier" />
+            <textarea name="notes" placeholder="Bill notes" rows={2} />
 
+            <div className="row">
+              <select value={menuPickId} onChange={(event) => setMenuPickId(event.target.value)}>
+                <option value="">Select menu item</option>
+                {restaurantMenu.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} ({currency.format(item.price)})
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min="1"
+                value={menuPickQty}
+                onChange={(event) => setMenuPickQty(Number(event.target.value) || 1)}
+              />
+              <button type="button" onClick={addDraftItem}>Add Item</button>
+            </div>
+
+            <ul className="list compact">
+              {orderItemsDraft.length === 0 && <li>No items selected yet.</li>}
+              {orderItemsDraft.map((item) => (
+                <li key={item.menuId} className="bill-line">
+                  <span>{menuById[item.menuId]?.name} x {item.qty}</span>
+                  <button type="button" onClick={() => removeDraftItem(item.menuId)}>Remove</button>
+                </li>
+              ))}
+            </ul>
+
+            <button type="submit">Create Restaurant Bill</button>
+          </form>
+        </Panel>
+      </section>
+
+      <section className="layout-two">
+        <Panel title="Restaurant Billing Management (Open)">
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Order</th>
+                  <th>Bill</th>
                   <th>Table</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Action</th>
+                  <th>Items</th>
+                  <th>Total</th>
+                  <th>Pay</th>
                 </tr>
               </thead>
               <tbody>
-                {restaurantOrders.map((order) => (
+                {openRestaurantOrders.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>No open bills.</td>
+                  </tr>
+                )}
+                {openRestaurantOrders.map((order) => (
                   <tr key={order.id}>
                     <td>{order.id}</td>
                     <td>{order.table}</td>
-                    <td>{currency.format(order.amount)}</td>
-                    <td>
-                      <span className={`badge ${order.status === 'paid' ? 'checked-in' : 'reserved'}`}>{order.status}</span>
-                    </td>
+                    <td>{(order.items || []).map((entry) => `${entry.name} x${entry.qty}`).join(', ')}</td>
+                    <td>{currency.format(order.totalAmount || order.amount || 0)}</td>
                     <td className="actions">
-                      {order.status !== 'paid' && <button onClick={() => payRestaurantOrder(order.id)}>Mark Paid</button>}
+                      <select
+                        value={paymentModes[order.id] || 'Cash'}
+                        onChange={(event) =>
+                          setPaymentModes((current) => ({
+                            ...current,
+                            [order.id]: event.target.value,
+                          }))
+                        }
+                      >
+                        <option>Cash</option>
+                        <option>Card</option>
+                        <option>UPI</option>
+                        <option>Room Charge</option>
+                      </select>
+                      <button onClick={() => payRestaurantOrder(order.id)}>Mark Paid</button>
                     </td>
                   </tr>
                 ))}
@@ -451,20 +589,12 @@ function App() {
           </div>
         </Panel>
 
-        <Panel title="Mail / Message Alerts">
-          <form className="stack" onSubmit={sendAlert}>
-            <select name="channel" defaultValue="Email">
-              <option>Email</option>
-              <option>SMS</option>
-            </select>
-            <input name="recipient" placeholder="Email or phone" required />
-            <textarea name="message" placeholder="Message" rows={2} required />
-            <button type="submit">Send Alert</button>
-          </form>
+        <Panel title="Restaurant Billing History (Paid)">
           <ul className="list compact">
-            {alerts.map((alert) => (
-              <li key={alert.id}>
-                <strong>{alert.channel}</strong> to {alert.recipient} - {alert.message} ({alert.deliveryStatus})
+            {paidRestaurantOrders.length === 0 && <li>No paid bills yet.</li>}
+            {paidRestaurantOrders.map((order) => (
+              <li key={order.id}>
+                <strong>{order.id}</strong> | Table {order.table} | {currency.format(order.totalAmount || 0)} | {order.paymentMode || 'NA'}
               </li>
             ))}
           </ul>
@@ -499,16 +629,22 @@ function App() {
           </div>
         </Panel>
 
-        <Panel title="Restaurant Open Orders">
+        <Panel title="Mail / Message Alerts">
+          <form className="stack" onSubmit={sendAlert}>
+            <select name="channel" defaultValue="Email">
+              <option>Email</option>
+              <option>SMS</option>
+            </select>
+            <input name="recipient" placeholder="Email or phone" required />
+            <textarea name="message" placeholder="Message" rows={2} required />
+            <button type="submit">Send Alert</button>
+          </form>
           <ul className="list compact">
-            {restaurantOrders.filter((order) => order.status !== 'paid').length === 0 && <li>No open restaurant orders.</li>}
-            {restaurantOrders
-              .filter((order) => order.status !== 'paid')
-              .map((order) => (
-                <li key={order.id}>
-                  <strong>{order.id}</strong> | Table {order.table} | {order.itemSummary} | {currency.format(order.amount)}
-                </li>
-              ))}
+            {alerts.map((alert) => (
+              <li key={alert.id}>
+                <strong>{alert.channel}</strong> to {alert.recipient} - {alert.message} ({alert.deliveryStatus})
+              </li>
+            ))}
           </ul>
         </Panel>
       </section>

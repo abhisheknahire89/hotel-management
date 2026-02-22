@@ -241,11 +241,33 @@ textarea {
   font-size: 0.85rem;
 }
 
+.tiny {
+  margin-top: -0.3rem;
+  color: #4d5a69;
+  font-size: 0.83rem;
+}
+
 .row {
   display: flex;
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.bill-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bill-line button {
+  padding: 0.2rem 0.45rem;
+}
+
+.actions select {
+  width: auto;
+  min-width: 110px;
 }
 
 .report {
